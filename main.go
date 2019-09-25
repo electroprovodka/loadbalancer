@@ -9,12 +9,17 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
 const (
 	PORT = "8081"
 )
+
+type RequestUpdater interface {
+	UpdateRequest(s Server, r *http.Request) error
+}
 
 type Server struct {
 	schema string
@@ -26,29 +31,48 @@ func (s Server) URL() string {
 	return s.schema + "://" + s.host + ":" + s.port
 }
 
-type Condition struct {
-	t string
-	v string
+// TODO: add regex
+// TODO: add header
+// TODO: add other checks?
+// TODO: add default type that matches all requests
+// TODO: add url rewrites
+
+// NOTE: is there any sence for "host"? since this LB should be an entrypoint there should be only one host
+type Condition interface {
+	Check(r *http.Request) bool
 }
 
-func (c Condition) Check(r *http.Request) bool {
-	// TODO: add regex
-	// TODO: add header
-	// TODO: add other checks?
-	// TODO: add default type that matches all requests
-	// TODO: add url rewrites
-	fmt.Println("Checking", c.t, c.v, "for", r.RequestURI, r.Host)
-	switch c.t {
-	case "prefix":
-		// TODO: Get full request url?
-		// TODO: Check c.value correctly (i.e. "api/" vs "/api" vs "/api/" vs "api")
-		return strings.HasPrefix(r.RequestURI, c.v)
-	case "host":
-		// TODO: Check host values with/without schema, port and slash
-		return r.Host == c.v
-	default:
-		return false
-	}
+type PrefixCondition struct {
+	prefix string
+}
+
+func (c *PrefixCondition) Check(r *http.Request) bool {
+	return strings.HasPrefix(r.RequestURI, c.prefix)
+}
+
+type RegexpCondition struct {
+	reg regexp.Regexp
+}
+
+func (c *RegexpCondition) Check(r *http.Request) bool {
+	return c.reg.MatchString(r.RequestURI)
+}
+
+type HasHeaderCondition struct {
+	header string
+}
+
+func (c *HasHeaderCondition) Check(r *http.Request) bool {
+	return len(r.Header.Get(c.header)) != 0
+}
+
+type HeaderValueCondition struct {
+	header string
+	value  string
+}
+
+func (c *HeaderValueCondition) Check(r *http.Request) bool {
+	return r.Header.Get(c.header) == c.value
 }
 
 // TODO: consider better name
@@ -200,12 +224,12 @@ func main() {
 		{"http", "127.0.0.1", "4000"},
 	}
 
-	condition1 := Condition{t: "prefix", v: "/jokes"}
-	condition2 := Condition{t: "host", v: "127.0.0.1"}
+	condition1 := HeaderValueCondition{header: "Custom", value: "Header"}
+	condition2 := PrefixCondition{prefix: "/jokes"}
 
 	var upstreams = []Upstream{
-		{servers: servers1, cond: condition1},
-		{servers: servers2, cond: condition2},
+		{servers: servers1, cond: &condition1},
+		{servers: servers2, cond: &condition2},
 	}
 
 	proxy := Proxy{us: upstreams}
