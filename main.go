@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -25,34 +26,85 @@ func (s Server) URL() string {
 	return s.schema + "://" + s.host + ":" + s.port
 }
 
+type Condition struct {
+	t string
+	v string
+}
+
+func (c Condition) Check(r *http.Request) bool {
+	// TODO: add regex
+	// TODO: add header
+	// TODO: add other checks?
+	// TODO: add default type that matches all requests
+	// TODO: add url rewrites
+	fmt.Println("Checking", c.t, c.v, "for", r.RequestURI, r.Host)
+	switch c.t {
+	case "prefix":
+		// TODO: Get full request url?
+		// TODO: Check c.value correctly (i.e. "api/" vs "/api" vs "/api/" vs "api")
+		return strings.HasPrefix(r.RequestURI, c.v)
+	case "host":
+		// TODO: Check host values with/without schema, port and slash
+		return r.Host == c.v
+	default:
+		return false
+	}
+}
+
 // TODO: consider better name
+// TODO: add weights?
 type Upstream struct {
+	cond    Condition
 	servers []Server
 	idx     int
 	name    string
 }
 
-func (u *Upstream) GetServer() Server {
+func (u *Upstream) GetServer() (*Server, error) {
+	if len(u.servers) == 0 {
+		// TODO: better error
+		// TODO: not nil response
+		return nil, errors.New("Empty upstream servers list")
+	}
 	// TODO: find better way for round robin
 	s := u.servers[u.idx%len(u.servers)]
 	u.idx++
-	return s
+	return &s, nil
 }
 
-var servers = []Server{
-	{"http", "127.0.0.1", "3000"},
-	{"http", "127.0.0.1", "4000"},
+type Proxy struct {
+	us []Upstream
 }
 
-var upstream = Upstream{servers: servers}
+func (p *Proxy) GetUpstream(r *http.Request) (*Upstream, error) {
+	for _, u := range p.us {
+		// TODO: more complex check type?
+		if u.cond.Check(r) {
+			fmt.Println("Found upstream", u.servers)
+			return &u, nil
+		}
+	}
+	// TODO: provide a better error
+	// TODO: not nil response?
+	return nil, errors.New("Can not find upstream")
+}
 
-func prepareRequest(r *http.Request) (*http.Request, error) {
+func (p *Proxy) prepareRequest(r *http.Request) (*http.Request, error) {
 	// TODO: What is context here?
 	// TODO: Should we copy request or we can just change the existing one
 	fwd := r.Clone(r.Context())
 
 	// TODO: consider better name
-	server := upstream.GetServer()
+	u, err := p.GetUpstream(r)
+	if err != nil {
+		fmt.Println("Upstream error", err)
+		return nil, err
+	}
+	server, err := u.GetServer()
+	if err != nil {
+		fmt.Println("Upstrean server error", err)
+		return nil, err
+	}
 	// TODO: check this is the way how url should be constructed
 	url, err := url.Parse(server.URL() + r.RequestURI)
 	if err != nil {
@@ -61,6 +113,7 @@ func prepareRequest(r *http.Request) (*http.Request, error) {
 		return nil, err
 	}
 	fmt.Println("Original url", r.RequestURI, "New url", url)
+	// TODO: update other request fields if needed
 	fwd.URL = url
 	fwd.Host = server.URL()
 	fwd.RequestURI = ""
@@ -71,7 +124,7 @@ func prepareRequest(r *http.Request) (*http.Request, error) {
 	return fwd, nil
 }
 
-func writeResponse(w http.ResponseWriter, resp *http.Response) error {
+func (p *Proxy) writeResponse(w http.ResponseWriter, resp *http.Response) error {
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Println("Response body error", err)
@@ -96,12 +149,14 @@ func writeResponse(w http.ResponseWriter, resp *http.Response) error {
 	return nil
 }
 
-func handler(w http.ResponseWriter, r *http.Request) {
+func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 	// TODO: return error to user
 
-	fwd, err := prepareRequest(r)
+	fwd, err := p.prepareRequest(r)
 	if err != nil {
 		// TODO: add logging
+		fmt.Println("Request preparation error", err)
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
 
@@ -111,10 +166,16 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	resp, err := client.Do(fwd)
 	if err != nil {
 		fmt.Println("Request error", err)
+		http.Error(w, http.StatusText(http.StatusBadGateway), http.StatusBadGateway)
 		return
 	}
 	fmt.Println("Response", resp.StatusCode)
-	writeResponse(w, resp)
+	err = p.writeResponse(w, resp)
+	if err != nil {
+		fmt.Println("Response write error", err)
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		return
+	}
 }
 
 func main() {
@@ -122,16 +183,35 @@ func main() {
 	// TODO: redirect rules
 	// TODO: file config
 	// TODO: hot reload
+	// TODO: logging
+	// TODO: tests
 	// TODO: graceful shutdown
 	// TODO: signals processing
-	// TODO: logging
+	// TODO: https
 	// TODO: metrics?
 	// TODO: healthchecks?
 	// TODO: targets autodiscovery?
-	// TODO: tests
+
+	var servers1 = []Server{
+		{"http", "127.0.0.1", "3000"},
+	}
+
+	servers2 := []Server{
+		{"http", "127.0.0.1", "4000"},
+	}
+
+	condition1 := Condition{t: "prefix", v: "/jokes"}
+	condition2 := Condition{t: "host", v: "127.0.0.1"}
+
+	var upstreams = []Upstream{
+		{servers: servers1, cond: condition1},
+		{servers: servers2, cond: condition2},
+	}
+
+	proxy := Proxy{us: upstreams}
 
 	// TODO: change HandleFunc?
-	http.HandleFunc("/", handler)
+	http.HandleFunc("/", proxy.handle)
 	// TODO: use cusom handler
 	err := http.ListenAndServe(":"+PORT, nil)
 	if err != nil {
