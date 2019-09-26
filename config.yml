@@ -1,0 +1,17 @@
+port: 8081
+
+upstreams:
+  upstream1:
+    condition:
+      type: RegeXP
+      value: /jokes/[\d]+
+    servers:
+      - http://127.0.0.1:3000
+
+  upstream2:
+    condition:
+      type: prefix
+      value: /jokes
+    servers:
+      - 127.0.0.1:4000
+      - http://127.0.0.1:4001
