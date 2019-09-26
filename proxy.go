@@ -25,12 +25,12 @@ func (s Server) URL() string {
 // TODO: add weights?
 type Upstream struct {
 	cond    Condition
-	servers []Server
+	servers []*Server
 	idx     int
 	name    string
 }
 
-func (u *Upstream) GetServer() (*Server, error) {
+func (u *Upstream) getServer() (*Server, error) {
 	if len(u.servers) == 0 {
 		// TODO: better error
 		// TODO: not nil response
@@ -39,19 +39,19 @@ func (u *Upstream) GetServer() (*Server, error) {
 	// TODO: find better way for round robin
 	s := u.servers[u.idx%len(u.servers)]
 	u.idx++
-	return &s, nil
+	return s, nil
 }
 
 type Proxy struct {
-	us []Upstream
+	us []*Upstream
 }
 
-func (p *Proxy) GetUpstream(r *http.Request) (*Upstream, error) {
-	for _, u := range p.us {
+func (p *Proxy) getUpstream(r *http.Request) (*Upstream, error) {
+	for idx := range p.us {
+		// Retrieve value directly without copy
 		// TODO: more complex check type?
-		if u.cond.Check(r) {
-			fmt.Println("Found upstream", u.servers)
-			return &u, nil
+		if p.us[idx].cond.Check(r) {
+			return p.us[idx], nil
 		}
 	}
 	// TODO: provide a better error
@@ -65,14 +65,15 @@ func (p *Proxy) prepareRequest(r *http.Request) (*http.Request, error) {
 	fwd := r.Clone(r.Context())
 
 	// TODO: consider better name
-	u, err := p.GetUpstream(r)
+	u, err := p.getUpstream(r)
+	fmt.Println("Got upstream", u)
 	if err != nil {
 		fmt.Println("Upstream error", err)
 		return nil, err
 	}
-	server, err := u.GetServer()
+	server, err := u.getServer()
 	if err != nil {
-		fmt.Println("Upstrean server error", err)
+		fmt.Println("Upstream server error", err)
 		return nil, err
 	}
 	// TODO: check this is the way how url should be constructed
@@ -95,6 +96,7 @@ func (p *Proxy) prepareRequest(r *http.Request) (*http.Request, error) {
 }
 
 func (p *Proxy) writeResponse(w http.ResponseWriter, resp *http.Response) error {
+	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Println("Response body error", err)
@@ -149,11 +151,11 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func NewProxy(config *Config) (*Proxy, error) {
-	upstreams := make([]Upstream, 0)
+	upstreams := make([]*Upstream, 0)
 	for _, cu := range config.Upstreams {
-		var servers []Server
+		var servers []*Server
 		for _, sURL := range cu.Servers {
-			servers = append(servers, Server{scheme: sURL.Scheme, host: sURL.Hostname(), port: sURL.Port()})
+			servers = append(servers, &Server{scheme: sURL.Scheme, host: sURL.Hostname(), port: sURL.Port()})
 		}
 		c := cu.Condition
 		cond := GetCondition(c.Type, c.Key, c.Value)
@@ -161,7 +163,7 @@ func NewProxy(config *Config) (*Proxy, error) {
 			return nil, fmt.Errorf("Can not parse condition for %s upstream", cu.Name)
 		}
 
-		upstreams = append(upstreams, Upstream{name: cu.Name, servers: servers, cond: cond})
+		upstreams = append(upstreams, &Upstream{name: cu.Name, servers: servers, cond: cond})
 	}
 	return &Proxy{upstreams}, nil
 }
