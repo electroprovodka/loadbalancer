@@ -148,7 +148,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func NewProxy(config *Config) Proxy {
+func NewProxy(config *Config) (*Proxy, error) {
 	upstreams := make([]Upstream, 0)
 	for _, cu := range config.Upstreams {
 		var servers []Server
@@ -157,8 +157,11 @@ func NewProxy(config *Config) Proxy {
 		}
 		c := cu.Condition
 		cond := GetCondition(c.Type, c.Key, c.Value)
+		if cond == nil {
+			return nil, fmt.Errorf("Can not parse condition for %s upstream", cu.Name)
+		}
 
 		upstreams = append(upstreams, Upstream{name: cu.Name, servers: servers, cond: cond})
 	}
-	return Proxy{upstreams}
+	return &Proxy{upstreams}, nil
 }

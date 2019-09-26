@@ -28,7 +28,7 @@ type FileConfig struct {
 type Cond struct {
 	Type  ConditionType
 	Key   string
-	Value interface{}
+	Value string
 }
 
 type Upstr struct {
@@ -97,12 +97,10 @@ func (fc FileConfig) validate() (*Config, error) {
 		}
 
 		if ct == RegexpCond {
-			reg, err := regexp.Compile(cond.Value)
+			_, err := regexp.Compile(cond.Value)
 			if err != nil {
 				return nil, fmt.Errorf("Upstream %s condition value is not a valid regexp", uname)
 			}
-			// Replacing the string value with parsed regexp
-			parsedCond.Value = reg
 		}
 
 		upstr := Upstr{Name: uname, Servers: sURLs, Condition: parsedCond}

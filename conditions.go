@@ -76,40 +76,22 @@ func (c *HeaderValueCondition) Check(r *http.Request) bool {
 	return r.Header.Get(c.header) == c.value
 }
 
-func GetCondition(t ConditionType, key string, value interface{}) Condition {
+func GetCondition(t ConditionType, key, value string) Condition {
 	switch t {
 	case PrefixCond:
-		{
-			val, ok := value.(string)
-			if !ok {
-				return nil
-			}
-			return &PrefixCondition{prefix: val}
-		}
+		return &PrefixCondition{prefix: value}
 	case RegexpCond:
 		{
-			reg, ok := value.(*regexp.Regexp)
-			if !ok {
+			reg, err := regexp.Compile(value)
+			if err != nil {
 				return nil
 			}
 			return &RegexpCondition{reg: reg}
 		}
 	case HasHeaderCond:
-		{
-			val, ok := value.(string)
-			if !ok {
-				return nil
-			}
-			return &HasHeaderCondition{header: val}
-		}
+		return &HasHeaderCondition{header: value}
 	case HeaderCond:
-		{
-			val, ok := value.(string)
-			if !ok {
-				return nil
-			}
-			return &HeaderValueCondition{header: key, value: val}
-		}
+		return &HeaderValueCondition{header: key, value: value}
 	}
 	return nil
 }
