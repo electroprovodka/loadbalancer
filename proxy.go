@@ -42,6 +42,7 @@ func (u *Upstream) getServer() (*Server, error) {
 	return s, nil
 }
 
+// Proxy is struct for managing the redirect settings
 type Proxy struct {
 	us []*Upstream
 }
@@ -113,8 +114,6 @@ func (p *Proxy) writeResponse(w http.ResponseWriter, resp *http.Response) error 
 }
 
 func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
-	// TODO: return error to user
-
 	fwd, err := p.prepareRequest(r)
 	if err != nil {
 		log.Println(err)
@@ -140,6 +139,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// NewProxy creates new Proxy struct based on the provided Config
 func NewProxy(config *Config) (*Proxy, error) {
 	upstreams := make([]*Upstream, 0)
 	for _, cu := range config.Upstreams {
