@@ -24,13 +24,13 @@ func main() {
 
 	config, err := ReadConfig("config.yml")
 	if err != nil {
-		log.Fatal(err.Error())
+		log.Fatal(err)
 		return
 	}
 
 	proxy, err := NewProxy(config)
 	if err != nil {
-		log.Fatal(err.Error())
+		log.Fatal(err)
 		return
 	}
 
@@ -39,6 +39,6 @@ func main() {
 	// TODO: use cusom handler
 	err = http.ListenAndServe(fmt.Sprintf(":%d", config.Port), nil)
 	if err != nil {
-		log.Fatal(err.Error())
+		log.Fatal(err)
 	}
 }

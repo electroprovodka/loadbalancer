@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/pkg/errors"
 	"gopkg.in/yaml.v2"
 )
 
@@ -48,7 +49,7 @@ func (fc FileConfig) validate() (*Config, error) {
 	// TODO: check for 0/to big port
 	// Allow int instead of strings
 	if fc.Port <= 0 || fc.Port > 65536 {
-		return nil, fmt.Errorf("Invalid Port value %s", fc.Port)
+		return nil, errors.Errorf("Invalid Port value %v", fc.Port)
 	}
 	conf.Port = fc.Port
 
@@ -60,7 +61,7 @@ func (fc FileConfig) validate() (*Config, error) {
 		var sURLs []url.URL
 
 		if len(ups.Servers) == 0 {
-			return nil, fmt.Errorf("Upstream %s should have at least one server", uname)
+			return nil, errors.Errorf("Upstream %s should have at least one server", uname)
 		}
 
 		for _, s := range ups.Servers {
@@ -70,7 +71,7 @@ func (fc FileConfig) validate() (*Config, error) {
 			}
 			u, err := url.Parse(s)
 			if err != nil || u.Hostname() == "" || u.Port() == "" {
-				return nil, fmt.Errorf("%s is not a valid host for upstream %s : %s", s, uname, err)
+				return nil, errors.Errorf("%s is not a valid host for upstream %s : %s", s, uname, err)
 			}
 			sURLs = append(sURLs, *u)
 		}
@@ -78,28 +79,28 @@ func (fc FileConfig) validate() (*Config, error) {
 		// TODO: check if type is in the known list
 		cond := ups.Condition
 		if cond.Type == "" {
-			return nil, fmt.Errorf("Upstream %s condition is missing the type field", uname)
+			return nil, errors.Errorf("Upstream %s condition is missing the type field", uname)
 		}
 
 		if cond.Value == "" {
-			return nil, fmt.Errorf("Upstream %s condition is missing the value field", uname)
+			return nil, errors.Errorf("Upstream %s condition is missing the value field", uname)
 		}
 
 		ct, err := GetConditionType(cond.Type)
 		if err != nil {
 			// TODO: wrap with upstream info
-			return nil, fmt.Errorf("Invalid condition type for upstream %s: %s", uname, err)
+			return nil, errors.Errorf("Invalid condition type for upstream %s: %s", uname, err)
 		}
 		parsedCond := Cond{Type: ct, Key: cond.Key, Value: cond.Value}
 
 		if ct == HeaderCond && cond.Key == "" {
-			return nil, fmt.Errorf("Upstream %s condition is missing the key field", uname)
+			return nil, errors.Errorf("Upstream %s condition is missing the key field", uname)
 		}
 
 		if ct == RegexpCond {
 			_, err := regexp.Compile(cond.Value)
 			if err != nil {
-				return nil, fmt.Errorf("Upstream %s condition value is not a valid regexp", uname)
+				return nil, errors.Errorf("Upstream %s condition value is not a valid regexp", uname)
 			}
 		}
 
@@ -113,22 +114,21 @@ func ReadConfig(path string) (*Config, error) {
 	// TODO: Check the correct way to read files
 	source, err := ioutil.ReadFile(path)
 	if err != nil {
-		// TODO: wrap error
-		return nil, err
+		return nil, errors.Wrapf(err, "can not read read config %s", path)
 	}
 
 	var fc FileConfig
 	err = yaml.Unmarshal(source, &fc)
 	if err != nil {
 		// TODO: wrap err
-		return nil, err
+		return nil, errors.Wrap(err, "can not read yaml config")
 	}
 
 	fmt.Println(fc)
 
 	config, err := fc.validate()
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "config is not valid")
 	}
 	return config, nil
 }

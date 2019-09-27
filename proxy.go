@@ -2,13 +2,15 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 type Server struct {
@@ -32,8 +34,6 @@ type Upstream struct {
 
 func (u *Upstream) getServer() (*Server, error) {
 	if len(u.servers) == 0 {
-		// TODO: better error
-		// TODO: not nil response
 		return nil, errors.New("Empty upstream servers list")
 	}
 	// TODO: find better way for round robin
@@ -49,14 +49,11 @@ type Proxy struct {
 func (p *Proxy) getUpstream(r *http.Request) (*Upstream, error) {
 	for idx := range p.us {
 		// Retrieve value directly without copy
-		// TODO: more complex check type?
 		if p.us[idx].cond.Check(r) {
 			return p.us[idx], nil
 		}
 	}
-	// TODO: provide a better error
-	// TODO: not nil response?
-	return nil, errors.New("Can not find upstream")
+	return nil, errors.New("No upstream matches the provided request")
 }
 
 func (p *Proxy) prepareRequest(r *http.Request) (*http.Request, error) {
@@ -66,24 +63,19 @@ func (p *Proxy) prepareRequest(r *http.Request) (*http.Request, error) {
 
 	// TODO: consider better name
 	u, err := p.getUpstream(r)
-	fmt.Println("Got upstream", u)
 	if err != nil {
-		fmt.Println("Upstream error", err)
-		return nil, err
+		return nil, errors.Wrap(err, "Error retrieving upstream")
 	}
 	server, err := u.getServer()
 	if err != nil {
-		fmt.Println("Upstream server error", err)
-		return nil, err
+		return nil, errors.Wrapf(err, "Can not get server for upstream %s", u.name)
 	}
 	// TODO: check this is the way how url should be constructed
 	url, err := url.Parse(server.URL() + r.RequestURI)
 	if err != nil {
-		fmt.Println("URL error", err)
-		// TODO: wrap error and process above
-		return nil, err
+		return nil, errors.Wrapf(err, "Can not parse the url %s", server.URL()+r.RequestURI)
 	}
-	fmt.Println("Original url", r.RequestURI, "New url", url)
+
 	// TODO: update other request fields if needed
 	fwd.URL = url
 	fwd.Host = server.URL()
@@ -92,6 +84,7 @@ func (p *Proxy) prepareRequest(r *http.Request) (*http.Request, error) {
 	// TODO: Remove/update all required headers
 	// TODO: Set all required headers
 	fwd.Header.Set("X-Forwarded-For", r.RemoteAddr)
+
 	return fwd, nil
 }
 
@@ -99,8 +92,7 @@ func (p *Proxy) writeResponse(w http.ResponseWriter, resp *http.Response) error 
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("Response body error", err)
-		return err
+		return errors.Wrap(err, "Error reading the upstream response")
 	}
 
 	w.WriteHeader(resp.StatusCode)
@@ -114,8 +106,7 @@ func (p *Proxy) writeResponse(w http.ResponseWriter, resp *http.Response) error 
 	// TODO: write directly?
 	_, err = io.Copy(w, bytes.NewBuffer(body))
 	if err != nil {
-		fmt.Println("Body write error", err)
-		return err
+		return errors.Wrap(err, "Error writing the response")
 	}
 
 	return nil
@@ -126,8 +117,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 
 	fwd, err := p.prepareRequest(r)
 	if err != nil {
-		// TODO: add logging
-		fmt.Println("Request preparation error", err)
+		log.Println(err)
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
@@ -137,14 +127,14 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := client.Do(fwd)
 	if err != nil {
-		fmt.Println("Request error", err)
+		log.Println("Error during making upstream request", err)
 		http.Error(w, http.StatusText(http.StatusBadGateway), http.StatusBadGateway)
 		return
 	}
 	fmt.Println("Response", resp.StatusCode)
 	err = p.writeResponse(w, resp)
 	if err != nil {
-		fmt.Println("Response write error", err)
+		log.Println(err)
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
@@ -160,7 +150,7 @@ func NewProxy(config *Config) (*Proxy, error) {
 		c := cu.Condition
 		cond := GetCondition(c.Type, c.Key, c.Value)
 		if cond == nil {
-			return nil, fmt.Errorf("Can not parse condition for %s upstream", cu.Name)
+			return nil, errors.Errorf("Can not parse condition for %s upstream", cu.Name)
 		}
 
 		upstreams = append(upstreams, &Upstream{name: cu.Name, servers: servers, cond: cond})

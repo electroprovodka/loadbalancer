@@ -1,10 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 // TODO: add regex
@@ -12,6 +13,7 @@ import (
 // TODO: add other checks?
 // TODO: add default type that matches all requests
 // TODO: add url rewrites
+// NOTE: is there any sence for "host"? since this LB should be an entrypoint there should be only one host
 
 type ConditionType string
 
@@ -33,12 +35,11 @@ func GetConditionType(t string) (ConditionType, error) {
 	// TODO: check condition types are equal based on underlying string
 	_, ok := validCondTypes[ct]
 	if !ok {
-		return ConditionType(""), fmt.Errorf("Invalid condition type %s", t)
+		return ConditionType(""), errors.Errorf("Invalid condition type %s", t)
 	}
 	return ct, nil
 }
 
-// NOTE: is there any sence for "host"? since this LB should be an entrypoint there should be only one host
 type Condition interface {
 	Check(r *http.Request) bool
 }
@@ -73,7 +74,7 @@ type HeaderValueCondition struct {
 }
 
 func (c *HeaderValueCondition) Check(r *http.Request) bool {
-	return r.Header.Get(c.header) == c.value
+	return strings.EqualFold(r.Header.Get(c.header), c.value)
 }
 
 func GetCondition(t ConditionType, key, value string) Condition {
