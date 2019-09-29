@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 )
@@ -25,6 +27,7 @@ func (s Server) URL() string {
 
 // TODO: consider better name
 // TODO: add weights?
+// TODO: add specific timeouts for each upstream?
 type Upstream struct {
 	cond    Condition
 	servers []*Server
@@ -44,7 +47,17 @@ func (u *Upstream) getServer() (*Server, error) {
 
 // Proxy is struct for managing the redirect settings
 type Proxy struct {
-	us []*Upstream
+	us           []*Upstream
+	proxyTimeout time.Duration
+}
+
+func (p *Proxy) getClient() (http.Client, error) {
+	// TODO: setup more timeouts if needed https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts/
+	// TODO: build manual timeout with context?
+	client := http.Client{
+		Timeout: p.proxyTimeout,
+	}
+	return client, nil
 }
 
 func (p *Proxy) getUpstream(r *http.Request) (*Upstream, error) {
@@ -59,18 +72,21 @@ func (p *Proxy) getUpstream(r *http.Request) (*Upstream, error) {
 
 func (p *Proxy) prepareRequest(r *http.Request) (*http.Request, error) {
 	// TODO: What is context here?
-	// TODO: Should we copy request or we can just change the existing one
-	fwd := r.Clone(r.Context())
+	// TODO: context timeouts/values?
+	ctx := context.Background()
+	fwd := r.Clone(ctx)
 
 	// TODO: consider better name
 	u, err := p.getUpstream(r)
 	if err != nil {
 		return nil, errors.Wrap(err, "Error retrieving upstream")
 	}
+
 	server, err := u.getServer()
 	if err != nil {
 		return nil, errors.Wrapf(err, "Can not get server for upstream %s", u.name)
 	}
+
 	// TODO: check this is the way how url should be constructed
 	url, err := url.Parse(server.URL() + r.RequestURI)
 	if err != nil {
@@ -113,30 +129,38 @@ func (p *Proxy) writeResponse(w http.ResponseWriter, resp *http.Response) error 
 	return nil
 }
 
-func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
+func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) (int, error) {
 	fwd, err := p.prepareRequest(r)
 	if err != nil {
 		log.Println(err)
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-		return
+		return http.StatusServiceUnavailable, err
 	}
 
-	// TODO: timeouts?
-	client := http.Client{}
+	client, err := p.getClient()
+	if err != nil {
+		return http.StatusServiceUnavailable, errors.Wrap(err, "Error during creating request client")
+	}
 
 	resp, err := client.Do(fwd)
 	if err != nil {
-		log.Println("Error during making upstream request", err)
-		http.Error(w, http.StatusText(http.StatusBadGateway), http.StatusBadGateway)
-		return
+		return http.StatusBadGateway, errors.Wrap(err, "Error during making upstream request")
 	}
 	fmt.Println("Response", resp.StatusCode)
 	err = p.writeResponse(w, resp)
 	if err != nil {
-		log.Println(err)
-		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-		return
+		return http.StatusServiceUnavailable, err
 	}
+	return resp.StatusCode, nil
+}
+
+func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request) {
+	status, err := p.handle(w, r)
+	if err != nil {
+		log.Println(err)
+		http.Error(w, http.StatusText(status), status)
+	}
+
 }
 
 // NewProxy creates new Proxy struct based on the provided Config
@@ -155,5 +179,6 @@ func NewProxy(config *Config) (*Proxy, error) {
 
 		upstreams = append(upstreams, &Upstream{name: cu.Name, servers: servers, cond: cond})
 	}
-	return &Proxy{upstreams}, nil
+	timeout := time.Duration(config.ProxyTimeout) * time.Second
+	return &Proxy{us: upstreams, proxyTimeout: timeout}, nil
 }

@@ -11,9 +11,13 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+// TODO: consider switching to one config instead of separate FileConfig and Config
 // FileConfig accepts data from yml config file
 type FileConfig struct {
-	Port int
+	Port               int
+	ServerReadTimeout  uint
+	ServerWriteTimeout uint
+	ProxyTimeout       uint
 
 	Upstreams map[string]struct {
 		Servers []string
@@ -39,19 +43,25 @@ type Upstr struct {
 }
 
 type Config struct {
-	Port      int
-	Upstreams []Upstr
+	Port               int
+	ServerReadTimeout  uint
+	ServerWriteTimeout uint
+	ProxyTimeout       uint
+	Upstreams          []Upstr
 }
 
 func (fc FileConfig) validate() (*Config, error) {
 	conf := Config{}
 
 	// TODO: check for 0/to big port
-	// Allow int instead of strings
 	if fc.Port <= 0 || fc.Port > 65536 {
 		return nil, errors.Errorf("Invalid Port value %v", fc.Port)
 	}
 	conf.Port = fc.Port
+	// TODO: find a better way to copy this values
+	conf.ServerReadTimeout = fc.ServerReadTimeout
+	conf.ServerWriteTimeout = fc.ServerWriteTimeout
+	conf.ProxyTimeout = fc.ProxyTimeout
 
 	// TODO: validate host name
 	// TODO: what rules should we apply?
@@ -120,7 +130,6 @@ func ReadConfig(path string) (*Config, error) {
 	var fc FileConfig
 	err = yaml.Unmarshal(source, &fc)
 	if err != nil {
-		// TODO: wrap err
 		return nil, errors.Wrap(err, "can not read yaml config")
 	}
 

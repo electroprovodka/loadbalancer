@@ -1,4 +1,6 @@
 port: 8081
+ServerReadTimeout: 1
+ProxyTimeout: 5
 
 upstreams:
   upstream1:

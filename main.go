@@ -4,7 +4,22 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 )
+
+func getServer(config *Config, router *http.ServeMux) (*http.Server, error) {
+	// TODO: check other timeouts (header, idle, etc.)
+	server := &http.Server{
+		Addr: fmt.Sprintf(":%d", config.Port),
+		// TODO: middlewares
+		Handler:     router,
+		ReadTimeout: time.Duration(config.ServerReadTimeout) * time.Second,
+		// TODO: check correct value for this field https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts/
+		WriteTimeout: time.Duration(config.ServerWriteTimeout) * time.Second,
+		// TODO: Idle timeout for keep alive connections
+	}
+	return server, nil
+}
 
 func main() {
 	// TODO: multiple targets
@@ -34,10 +49,16 @@ func main() {
 		return
 	}
 
-	// TODO: change HandleFunc?
-	http.HandleFunc("/", proxy.handle)
-	// TODO: use cusom handler
-	err = http.ListenAndServe(fmt.Sprintf(":%d", config.Port), nil)
+	router := http.NewServeMux()
+	router.HandleFunc("/", proxy.Handle)
+
+	server, err := getServer(config, router)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	err = server.ListenAndServe()
 	if err != nil {
 		log.Fatal(err)
 	}
