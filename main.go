@@ -9,6 +9,7 @@ import (
 
 func getServer(config *Config, router *http.ServeMux) (*http.Server, error) {
 	// TODO: check other timeouts (header, idle, etc.)
+	// TODO: Headers/Body size limit?
 	server := &http.Server{
 		Addr: fmt.Sprintf(":%d", config.Port),
 		// TODO: middlewares
@@ -36,6 +37,7 @@ func main() {
 	// TODO: healthchecks?
 	// TODO: targets autodiscovery?
 	// TODO: API for controlling
+	// TODO: Docker image
 
 	config, err := ReadConfig("config.yml")
 	if err != nil {
@@ -50,6 +52,7 @@ func main() {
 	}
 
 	router := http.NewServeMux()
+	// TODO: use TimeoutHandler for timeouts for the overall flow?
 	router.HandleFunc("/", proxy.Handle)
 
 	server, err := getServer(config, router)

@@ -52,9 +52,11 @@ type Proxy struct {
 }
 
 func (p *Proxy) getClient() (http.Client, error) {
+	// TODO: Read/Write buffers sizes
 	// TODO: setup more timeouts if needed https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts/
 	// TODO: build manual timeout with context?
 	client := http.Client{
+		// NOTE: this timeout includes the response body read
 		Timeout: p.proxyTimeout,
 	}
 	return client, nil
@@ -73,7 +75,8 @@ func (p *Proxy) getUpstream(r *http.Request) (*Upstream, error) {
 func (p *Proxy) prepareRequest(r *http.Request) (*http.Request, error) {
 	// TODO: What is context here?
 	// TODO: context timeouts/values?
-	ctx := context.Background()
+	// TODO: use cancel func?
+	ctx, _ := context.WithCancel(r.Context())
 	fwd := r.Clone(ctx)
 
 	// TODO: consider better name
@@ -88,37 +91,48 @@ func (p *Proxy) prepareRequest(r *http.Request) (*http.Request, error) {
 	}
 
 	// TODO: check this is the way how url should be constructed
-	url, err := url.Parse(server.URL() + r.RequestURI)
+	url, err := url.Parse(server.URL() + r.URL.RequestURI())
 	if err != nil {
 		return nil, errors.Wrapf(err, "Can not parse the url %s", server.URL()+r.RequestURI)
 	}
 
+	// TODO: log
+
 	// TODO: update other request fields if needed
 	fwd.URL = url
-	fwd.Host = server.URL()
+	// Replace the value of the Host in Request
+	// Also no need to update the Host header b/c it's removed from the Request automatically
+	fwd.Host = url.Host
 	fwd.RequestURI = ""
 
 	// TODO: Remove/update all required headers
 	// TODO: Set all required headers
+	// TODO: Compression?
+	// TODO: use CanonicalHeaderKey to create correct header names
 	fwd.Header.Set("X-Forwarded-For", r.RemoteAddr)
 
 	return fwd, nil
 }
 
 func (p *Proxy) writeResponse(w http.ResponseWriter, resp *http.Response) error {
+	// TODO: compression
 	defer resp.Body.Close()
+	// NOTE: the err might be a timeout caused by the proxyTimeout for request
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return errors.Wrap(err, "Error reading the upstream response")
 	}
 
-	w.WriteHeader(resp.StatusCode)
-
+	// TODO: update location
 	for k, v := range resp.Header {
 		// TODO: headers filtering
 		// TODO: values processing
+		// TODO: clean default headers (like Date)
 		w.Header().Add(k, strings.Join(v, ";"))
 	}
+
+	// TODO: should WriteHeader be after the other headers?
+	w.WriteHeader(resp.StatusCode)
 
 	// TODO: write directly?
 	_, err = io.Copy(w, bytes.NewBuffer(body))
