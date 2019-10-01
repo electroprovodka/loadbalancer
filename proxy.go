@@ -2,11 +2,10 @@ package main
 
 import (
 	"bytes"
-	"context"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,10 +20,6 @@ type Server struct {
 	port   string
 }
 
-func (s Server) URL() string {
-	return s.scheme + "://" + s.host + ":" + s.port
-}
-
 // TODO: consider better name
 // TODO: add weights?
 // TODO: add specific timeouts for each upstream?
@@ -35,6 +30,16 @@ type Upstream struct {
 	name    string
 }
 
+// Proxy is struct for managing the redirect settings
+type Proxy struct {
+	us           []*Upstream
+	proxyTimeout time.Duration
+}
+
+func (s Server) URL() string {
+	return s.scheme + "://" + s.host + ":" + s.port
+}
+
 func (u *Upstream) getServer() (*Server, error) {
 	if len(u.servers) == 0 {
 		return nil, errors.New("Empty upstream servers list")
@@ -43,12 +48,6 @@ func (u *Upstream) getServer() (*Server, error) {
 	s := u.servers[u.idx%len(u.servers)]
 	u.idx++
 	return s, nil
-}
-
-// Proxy is struct for managing the redirect settings
-type Proxy struct {
-	us           []*Upstream
-	proxyTimeout time.Duration
 }
 
 func (p *Proxy) getClient() (http.Client, error) {
@@ -72,12 +71,43 @@ func (p *Proxy) getUpstream(r *http.Request) (*Upstream, error) {
 	return nil, errors.New("No upstream matches the provided request")
 }
 
+// Copy of the same list from  https://golang.org/src/net/http/httputil/reverseproxy.go
+// Headers that are used for the particular hop in the end-to-end connection between client and backend
+// We remove them b/c we intercept the connection and for client we are backend
+var hopHeaders = []string{
+	"Connection",
+	"Proxy-Connection",
+	"Keep-Alive",
+	"Proxy-Authenticate",
+	"Proxy-Authorization",
+	"Te",
+	"Trailer",
+	"Transfer-Encoding",
+	"Upgrade",
+}
+
+// Copy of the same function from https://golang.org/src/net/http/httputil/reverseproxy.go
+func removeConnectionHeaders(h http.Header) {
+	for _, f := range h["Connection"] {
+		for _, sf := range strings.Split(f, ",") {
+			if sf = strings.TrimSpace(sf); sf != "" {
+				h.Del(sf)
+			}
+		}
+	}
+}
+
+// Copy of the same functionality from https://golang.org/src/net/http/httputil/reverseproxy.go:212
+func removeHopByHopHeaders(h http.Header) {
+	// Remove hop-by-hop headers to the backend.
+	for _, hn := range hopHeaders {
+		h.Del(hn)
+	}
+}
+
 func (p *Proxy) prepareRequest(r *http.Request) (*http.Request, error) {
-	// TODO: What is context here?
 	// TODO: context timeouts/values?
-	// TODO: use cancel func?
-	ctx, _ := context.WithCancel(r.Context())
-	fwd := r.Clone(ctx)
+	fwd := r.Clone(r.Context())
 
 	// TODO: consider better name
 	u, err := p.getUpstream(r)
@@ -93,46 +123,67 @@ func (p *Proxy) prepareRequest(r *http.Request) (*http.Request, error) {
 	// TODO: check this is the way how url should be constructed
 	url, err := url.Parse(server.URL() + r.URL.RequestURI())
 	if err != nil {
-		return nil, errors.Wrapf(err, "Can not parse the url %s", server.URL()+r.RequestURI)
+		return nil, errors.Wrapf(err, "Can not parse the url %s", server.URL()+r.URL.RequestURI())
 	}
 
 	// TODO: log
 
-	// TODO: update other request fields if needed
 	fwd.URL = url
+
 	// Replace the value of the Host in Request
 	// Also no need to update the Host header b/c it's removed from the Request automatically
-	fwd.Host = url.Host
+	// ????? fwd.Host = url.Host
+
 	fwd.RequestURI = ""
 
-	// TODO: Remove/update all required headers
-	// TODO: Set all required headers
-	// TODO: Compression?
-	// TODO: use CanonicalHeaderKey to create correct header names
-	fwd.Header.Set("X-Forwarded-For", r.RemoteAddr)
+	if _, ok := fwd.Header["User-Agent"]; !ok {
+		// See https://golang.org/src/net/http/httputil/reverseproxy.go for details
+		fwd.Header.Set("User-Agent", "")
+	}
+
+	// TODO: allow the connection upgrade
+	if callerIP, _, err := net.SplitHostPort(fwd.RemoteAddr); err != nil {
+		if prior, ok := fwd.Header["X-Forwarded-For"]; ok {
+			callerIP = strings.Join(prior, ",") + "," + callerIP
+		}
+		// NOTE: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Forwarded
+		fwd.Header.Set("X-Forwarded-For", callerIP)
+		// TODO: Process the ipv6 correctly
+		// TODO: decide which header to use(probably both)
+		fwd.Header.Set("Forwarded", "for="+callerIP)
+	}
+
+	fwd.Header.Set("X-Forwarded-Proto", fwd.URL.Scheme)
+
+	removeConnectionHeaders(fwd.Header)
+	removeHopByHopHeaders(fwd.Header)
 
 	return fwd, nil
 }
 
 func (p *Proxy) writeResponse(w http.ResponseWriter, resp *http.Response) error {
-	// TODO: compression
 	defer resp.Body.Close()
+
+	removeConnectionHeaders(resp.Header)
+	removeHopByHopHeaders(resp.Header)
+
+	// TODO: update location
+	for k, vv := range resp.Header {
+		// TODO: headers filtering
+		// TODO: values processing
+		for _, v := range vv {
+			w.Header().Add(k, v)
+		}
+	}
+
+	w.WriteHeader(resp.StatusCode)
+
 	// NOTE: the err might be a timeout caused by the proxyTimeout for request
+	// TODO: read and write in chunks
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return errors.Wrap(err, "Error reading the upstream response")
 	}
-
-	// TODO: update location
-	for k, v := range resp.Header {
-		// TODO: headers filtering
-		// TODO: values processing
-		// TODO: clean default headers (like Date)
-		w.Header().Add(k, strings.Join(v, ";"))
-	}
-
-	// TODO: should WriteHeader be after the other headers?
-	w.WriteHeader(resp.StatusCode)
 
 	// TODO: write directly?
 	_, err = io.Copy(w, bytes.NewBuffer(body))
@@ -144,11 +195,10 @@ func (p *Proxy) writeResponse(w http.ResponseWriter, resp *http.Response) error 
 }
 
 func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) (int, error) {
+	// TODO: process the timeout errors
 	fwd, err := p.prepareRequest(r)
 	if err != nil {
-		log.Println(err)
-		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-		return http.StatusServiceUnavailable, err
+		return http.StatusServiceUnavailable, errors.Wrap(err, "Error during the proxy request preparation")
 	}
 
 	client, err := p.getClient()
@@ -160,7 +210,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) (int, error) {
 	if err != nil {
 		return http.StatusBadGateway, errors.Wrap(err, "Error during making upstream request")
 	}
-	fmt.Println("Response", resp.StatusCode)
+
 	err = p.writeResponse(w, resp)
 	if err != nil {
 		return http.StatusServiceUnavailable, err
