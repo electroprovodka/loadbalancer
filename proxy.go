@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"io"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/pkg/errors"
 )

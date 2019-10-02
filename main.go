@@ -4,13 +4,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/rs/xid"
 )
