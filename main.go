@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/rs/xid"
 )
 
 // healthy is the marker of the server status
@@ -18,13 +20,48 @@ import (
 // 1 means server is up and running
 var healthy int32
 
+type key int
+
+var requestIDKey key = 0
+
+func getRequestID() string {
+	return xid.New().String()
+}
+
+func trace(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.Header.Get("X-Request-Id")
+		if requestID == "" {
+			requestID = getRequestID()
+		}
+		ctx := context.WithValue(r.Context(), requestIDKey, requestID)
+		r.Header.Set("X-Request-Id", requestID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func logging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			requestID, ok := r.Context().Value(requestIDKey).(string)
+			if !ok {
+				// TODO: generate new ID?
+				requestID = "unknown"
+			}
+			// TODO: log response code
+			log.Println(requestID, r.Method, r.URL.Path, r.RemoteAddr, r.UserAgent())
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
 func getServer(config *Config, router *http.ServeMux) (*http.Server, error) {
 	// TODO: check other timeouts (header, idle, etc.)
 	// TODO: Headers/Body size limit?
 	server := &http.Server{
 		Addr: fmt.Sprintf(":%d", config.Port),
 		// TODO: middlewares
-		Handler:     router,
+		Handler:     trace(logging(router)),
 		ReadTimeout: time.Duration(config.ServerReadTimeout) * time.Second,
 		// TODO: check correct value for this field https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts/
 		WriteTimeout: time.Duration(config.ServerWriteTimeout) * time.Second,
