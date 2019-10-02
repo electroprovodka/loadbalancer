@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io/ioutil"
 	"net/url"
 	"regexp"
@@ -132,8 +131,6 @@ func ReadConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "can not read yaml config")
 	}
-
-	fmt.Println(fc)
 
 	config, err := fc.validate()
 	if err != nil {
