@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -40,6 +41,16 @@ func health(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusServiceUnavailable)
 }
 
+func parseFlags() string {
+	var config string
+	flag.StringVar(&config, "config", "", "path to the proxy config")
+	flag.Parse()
+	if config == "" {
+		log.Fatal("--config is required field to start the server")
+	}
+	return config
+}
+
 func main() {
 	// TODO: multiple targets
 	// TODO: redirect rules
@@ -57,7 +68,9 @@ func main() {
 	// TODO: API for controlling
 	// TODO: Docker image
 
-	config, err := ReadConfig("config.yml")
+	configPath := parseFlags()
+
+	config, err := ReadConfig(configPath)
 	if err != nil {
 		log.Fatal(err)
 		return
@@ -108,7 +121,7 @@ func main() {
 	log.Printf("Starting the server on port :%d\n", config.Port)
 
 	atomic.StoreInt32(&healthy, 1)
-	
+
 	err = server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Unexpected server error: %s\n", err)
