@@ -20,7 +20,6 @@ type Server struct {
 	port   string
 }
 
-// TODO: consider better name
 // TODO: add weights?
 // TODO: add specific timeouts for each upstream?
 type Upstream struct {
@@ -196,16 +195,16 @@ func (p *Proxy) writeResponse(w http.ResponseWriter, resp *http.Response) error 
 
 func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) (int, error) {
 	// TODO: process the timeout errors
-	fwd, err := p.prepareRequest(r)
-	if err != nil {
-		return http.StatusServiceUnavailable, errors.Wrap(err, "Error during the proxy request preparation")
-	}
-
 	client, err := p.getClient()
 	if err != nil {
 		return http.StatusServiceUnavailable, errors.Wrap(err, "Error during creating request client")
 	}
 
+	fwd, err := p.prepareRequest(r)
+	if err != nil {
+		return http.StatusServiceUnavailable, errors.Wrap(err, "Error during the proxy request preparation")
+	}
+	log.Println(fwd.URL)
 	resp, err := client.Do(fwd)
 	if err != nil {
 		return http.StatusBadGateway, errors.Wrap(err, "Error during making upstream request")
@@ -222,6 +221,9 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request) {
 	status, err := p.handle(w, r)
 	if err != nil {
 		log.Println(err)
+		if e, ok := errors.Cause(err).(net.Error); ok && e.Timeout() {
+			status = http.StatusGatewayTimeout
+		}
 		http.Error(w, http.StatusText(status), status)
 	}
 

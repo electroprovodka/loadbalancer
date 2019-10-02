@@ -108,6 +108,7 @@ func main() {
 	log.Printf("Starting the server on port :%d\n", config.Port)
 
 	atomic.StoreInt32(&healthy, 1)
+	
 	err = server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Unexpected server error: %s\n", err)

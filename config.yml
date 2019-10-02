@@ -1,19 +1,18 @@
 port: 8081
-ServerReadTimeout: 1
-ProxyTimeout: 5
+serverReadTimeout: 1
+proxyTimeout: 5
 
 upstreams:
   upstream1:
     condition:
-      type: RegeXP
-      value: /jokes/[\d]+
+      type: prefix
+      value: /api/jokes
     servers:
       - http://127.0.0.1:3000
 
   upstream2:
     condition:
       type: prefix
-      value: /jokes
+      value: /
     servers:
-      - 127.0.0.1:4000
-      - http://127.0.0.1:4001
+      - 127.0.0.1:3000

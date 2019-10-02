@@ -14,9 +14,9 @@ import (
 // FileConfig accepts data from yml config file
 type FileConfig struct {
 	Port               int
-	ServerReadTimeout  uint
-	ServerWriteTimeout uint
-	ProxyTimeout       uint
+	ServerReadTimeout  int `yaml:"serverReadTimeout"`
+	ServerWriteTimeout int `yaml:"serverWriteTimeout"`
+	ProxyTimeout       int `yaml:"proxyTimeout"`
 
 	Upstreams map[string]struct {
 		Servers []string
@@ -43,9 +43,9 @@ type Upstr struct {
 
 type Config struct {
 	Port               int
-	ServerReadTimeout  uint
-	ServerWriteTimeout uint
-	ProxyTimeout       uint
+	ServerReadTimeout  int
+	ServerWriteTimeout int
+	ProxyTimeout       int
 	Upstreams          []Upstr
 }
 
