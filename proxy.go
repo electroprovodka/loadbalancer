@@ -51,6 +51,7 @@ func (u *upstream) getServer() (*server, error) {
 }
 
 func (p *Proxy) getClient() (http.Client, error) {
+	// TODO: reuse same client for multiple requests
 	// TODO: Read/Write buffers sizes
 	// TODO: setup more timeouts if needed https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts/
 	// TODO: build manual timeout with context?
@@ -238,8 +239,7 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request) {
 
 }
 
-// NewProxy creates new Proxy struct based on the provided Config
-func NewProxy(config *Config) (*Proxy, error) {
+func configureUpstreams(config *Config) ([]*upstream, error) {
 	upstreams := make([]*upstream, 0)
 	for _, cu := range config.Upstreams {
 		var servers []*server
@@ -253,6 +253,27 @@ func NewProxy(config *Config) (*Proxy, error) {
 		}
 
 		upstreams = append(upstreams, &upstream{name: cu.Name, servers: servers, cond: cond})
+	}
+	return upstreams, nil
+}
+
+// Reload is method that allows to reload Proxy config without restarting the server
+func (p *Proxy) Update(config *Config) error {
+	upstreams, err := configureUpstreams(config)
+	if err != nil {
+		return errors.Wrap(err, "Can not update Proxy")
+	}
+	// Update current proxy with new configuration
+	p.us = upstreams
+	p.proxyTimeout = time.Duration(config.ProxyTimeout) * time.Second
+	return nil
+}
+
+// NewProxy creates new Proxy struct based on the provided Config
+func NewProxy(config *Config) (*Proxy, error) {
+	upstreams, err := configureUpstreams(config)
+	if err != nil {
+		return nil, errors.Wrap(err, "Can not create new Proxy")
 	}
 	timeout := time.Duration(config.ProxyTimeout) * time.Second
 	return &Proxy{us: upstreams, proxyTimeout: timeout}, nil
