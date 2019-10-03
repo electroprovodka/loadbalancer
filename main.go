@@ -22,9 +22,12 @@ func parseFlags() string {
 	return config
 }
 
-func setupLogging() {
+func setupLogging(config *Config) {
 	// TODO: add setup
-
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp: true,
+	})
+	// TODO: set level
 }
 
 func getRouter(h http.HandlerFunc) *http.ServeMux {
@@ -90,7 +93,7 @@ func main() {
 		return
 	}
 
-	setupLogging()
+	setupLogging(config)
 
 	proxy, err := NewProxy(config)
 	if err != nil {
@@ -99,7 +102,7 @@ func main() {
 	}
 
 	router := getRouter(proxy.Handle)
-	server, err := getServer(config, router, tracing, logging)
+	server, err := getServer(config, router, tracing)
 	if err != nil {
 		log.Fatal(err)
 		return

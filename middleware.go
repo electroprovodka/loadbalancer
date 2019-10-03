@@ -16,8 +16,17 @@ type key int
 
 var requestIDKey key = 0
 
-func getRequestID() string {
+func newRequestID() string {
 	return xid.New().String()
+}
+
+func getRequestID(ctx context.Context) string {
+	requestID, ok := ctx.Value(requestIDKey).(string)
+	if !ok {
+		// TODO: generate new ID?
+		requestID = "unknown"
+	}
+	return requestID
 }
 
 // Apply list of middlewares for router
@@ -35,7 +44,7 @@ func tracing(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get("X-Request-Id")
 		if requestID == "" {
-			requestID = getRequestID()
+			requestID = newRequestID()
 		}
 		ctx := context.WithValue(r.Context(), requestIDKey, requestID)
 		r.Header.Set("X-Request-Id", requestID)
@@ -46,14 +55,10 @@ func tracing(next http.Handler) http.Handler {
 func logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
-			requestID, ok := r.Context().Value(requestIDKey).(string)
-			if !ok {
-				// TODO: generate new ID?
-				requestID = "unknown"
-			}
+			requestID := getRequestID(r.Context())
 			// TODO: log response code
 			// TODO: log the target redirect
-			log.Printf("[ID:%s] %s %s, %s, %s", requestID, r.Method, r.URL.Path, r.RemoteAddr, r.UserAgent())
+			log.Infof("[ID:%s] %s %s, %s, %s", requestID, r.Method, r.URL.Path, r.RemoteAddr, r.UserAgent())
 		}()
 		next.ServeHTTP(w, r)
 	})

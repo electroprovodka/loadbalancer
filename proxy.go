@@ -112,7 +112,7 @@ func (p *Proxy) prepareRequest(r *http.Request) (*http.Request, error) {
 	// TODO: consider better name
 	u, err := p.getUpstream(r)
 	if err != nil {
-		return nil, errors.Wrap(err, "Error retrieving upstream")
+		return nil, errors.Wrap(err, "Can not find suitable upstream")
 	}
 
 	server, err := u.getServer()
@@ -182,20 +182,20 @@ func (p *Proxy) writeResponse(w http.ResponseWriter, resp *http.Response) error 
 	// TODO: read and write in chunks
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return errors.Wrap(err, "Error reading the upstream response")
+		return errors.Wrap(err, "Can not read the upstream response")
 	}
 
 	// TODO: write directly?
 	_, err = io.Copy(w, bytes.NewBuffer(body))
 	if err != nil {
-		return errors.Wrap(err, "Error writing the response")
+		// TODO: downstream?
+		return errors.Wrap(err, "Can not copy the response to downstream")
 	}
 
 	return nil
 }
 
 func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) (int, error) {
-	// TODO: process the timeout errors
 	client, err := p.getClient()
 	if err != nil {
 		return http.StatusServiceUnavailable, errors.Wrap(err, "Error during creating request client")
@@ -205,6 +205,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) (int, error) {
 	if err != nil {
 		return http.StatusServiceUnavailable, errors.Wrap(err, "Error during the proxy request preparation")
 	}
+
 	resp, err := client.Do(fwd)
 	if err != nil {
 		return http.StatusBadGateway, errors.Wrap(err, "Error during making upstream request")
@@ -212,8 +213,13 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) (int, error) {
 
 	err = p.writeResponse(w, resp)
 	if err != nil {
-		return http.StatusServiceUnavailable, err
+		return http.StatusServiceUnavailable, errors.Wrap(err, "Error during writing the upstream response")
 	}
+
+	// TODO: add content length?
+	// TODO: check how logging works for proxies
+	log.Infof("[ID:%s] %s %s -> %s %d, %s, %s", getRequestID(r.Context()), r.Method, r.URL.Path, fwd.URL, resp.StatusCode, r.RemoteAddr, r.UserAgent())
+
 	return resp.StatusCode, nil
 }
 
@@ -222,7 +228,8 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) (int, error) {
 func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request) {
 	status, err := p.handle(w, r)
 	if err != nil {
-		log.Error(err)
+		log.Errorf("[ID:%s] %s %s : %s", getRequestID(r.Context()), r.Method, r.URL.Path, err)
+
 		if e, ok := errors.Cause(err).(net.Error); ok && e.Timeout() {
 			status = http.StatusGatewayTimeout
 		}
