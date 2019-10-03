@@ -15,27 +15,27 @@ import (
 // TODO: add url rewrites
 // NOTE: is there any sence for "host"? since this LB should be an entrypoint there should be only one host
 
-type ConditionType string
+type conditionType string
 
 // TODO: find better names for constants
 const (
 	// TODO: find better names for constants
-	PrefixCond    = ConditionType("prefix")
-	RegexpCond    = ConditionType("regexp")
-	HasHeaderCond = ConditionType("hasheader")
-	HeaderCond    = ConditionType("header")
+	PrefixCond    = conditionType("prefix")
+	RegexpCond    = conditionType("regexp")
+	HasHeaderCond = conditionType("hasheader")
+	HeaderCond    = conditionType("header")
 )
 
-var validCondTypes = map[ConditionType]bool{
+var validCondTypes = map[conditionType]bool{
 	PrefixCond: true, RegexpCond: true, HasHeaderCond: true, HeaderCond: true,
 }
 
-func GetConditionType(t string) (ConditionType, error) {
-	ct := ConditionType(strings.ToLower(t))
+func GetConditionType(t string) (conditionType, error) {
+	ct := conditionType(strings.ToLower(t))
 	// TODO: check condition types are equal based on underlying string
 	_, ok := validCondTypes[ct]
 	if !ok {
-		return ConditionType(""), errors.Errorf("Invalid condition type %s", t)
+		return conditionType(""), errors.Errorf("Invalid condition type %s", t)
 	}
 	return ct, nil
 }
@@ -77,7 +77,7 @@ func (c *HeaderValueCondition) Check(r *http.Request) bool {
 	return strings.EqualFold(r.Header.Get(c.header), c.value)
 }
 
-func GetCondition(t ConditionType, key, value string) Condition {
+func GetCondition(t conditionType, key, value string) Condition {
 	switch t {
 	case PrefixCond:
 		return &PrefixCondition{prefix: value}

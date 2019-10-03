@@ -30,7 +30,7 @@ type FileConfig struct {
 }
 
 type Cond struct {
-	Type  ConditionType
+	Type  conditionType
 	Key   string
 	Value string
 }

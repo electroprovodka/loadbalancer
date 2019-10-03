@@ -15,7 +15,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-type Server struct {
+type server struct {
 	scheme string
 	host   string
 	port   string
@@ -23,24 +23,24 @@ type Server struct {
 
 // TODO: add weights?
 // TODO: add specific timeouts for each upstream?
-type Upstream struct {
+type upstream struct {
 	cond    Condition
-	servers []*Server
+	servers []*server
 	idx     int
 	name    string
 }
 
 // Proxy is struct for managing the redirect settings
 type Proxy struct {
-	us           []*Upstream
+	us           []*upstream
 	proxyTimeout time.Duration
 }
 
-func (s Server) URL() string {
+func (s server) URL() string {
 	return s.scheme + "://" + s.host + ":" + s.port
 }
 
-func (u *Upstream) getServer() (*Server, error) {
+func (u *upstream) getServer() (*server, error) {
 	if len(u.servers) == 0 {
 		return nil, errors.New("Empty upstream servers list")
 	}
@@ -61,7 +61,7 @@ func (p *Proxy) getClient() (http.Client, error) {
 	return client, nil
 }
 
-func (p *Proxy) getUpstream(r *http.Request) (*Upstream, error) {
+func (p *Proxy) getUpstream(r *http.Request) (*upstream, error) {
 	for idx := range p.us {
 		// Retrieve value directly without copy
 		if p.us[idx].cond.Check(r) {
@@ -126,13 +126,13 @@ func (p *Proxy) prepareRequest(r *http.Request) (*http.Request, error) {
 		return nil, errors.Wrapf(err, "Can not parse the url %s", server.URL()+r.URL.RequestURI())
 	}
 
-	// TODO: log
-
 	fwd.URL = url
 
 	// Replace the value of the Host in Request
 	// Also no need to update the Host header b/c it's removed from the Request automatically
 	// ????? fwd.Host = url.Host
+	// TODO: restore the original host in request
+	// fwd.Header.Set("Host", fwd.Host)
 
 	fwd.RequestURI = ""
 
@@ -205,7 +205,6 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) (int, error) {
 	if err != nil {
 		return http.StatusServiceUnavailable, errors.Wrap(err, "Error during the proxy request preparation")
 	}
-	log.Println(fwd.URL)
 	resp, err := client.Do(fwd)
 	if err != nil {
 		return http.StatusBadGateway, errors.Wrap(err, "Error during making upstream request")
@@ -218,10 +217,12 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) (int, error) {
 	return resp.StatusCode, nil
 }
 
+// Handle is a http.HandlerFunc that serves as a root of the proxy
+// It accepts all requests and redirects them to the proxied servers
 func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request) {
 	status, err := p.handle(w, r)
 	if err != nil {
-		log.Println(err)
+		log.Error(err)
 		if e, ok := errors.Cause(err).(net.Error); ok && e.Timeout() {
 			status = http.StatusGatewayTimeout
 		}
@@ -232,11 +233,11 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request) {
 
 // NewProxy creates new Proxy struct based on the provided Config
 func NewProxy(config *Config) (*Proxy, error) {
-	upstreams := make([]*Upstream, 0)
+	upstreams := make([]*upstream, 0)
 	for _, cu := range config.Upstreams {
-		var servers []*Server
+		var servers []*server
 		for _, sURL := range cu.Servers {
-			servers = append(servers, &Server{scheme: sURL.Scheme, host: sURL.Hostname(), port: sURL.Port()})
+			servers = append(servers, &server{scheme: sURL.Scheme, host: sURL.Hostname(), port: sURL.Port()})
 		}
 		c := cu.Condition
 		cond := GetCondition(c.Type, c.Key, c.Value)
@@ -244,7 +245,7 @@ func NewProxy(config *Config) (*Proxy, error) {
 			return nil, errors.Errorf("Can not parse condition for %s upstream", cu.Name)
 		}
 
-		upstreams = append(upstreams, &Upstream{name: cu.Name, servers: servers, cond: cond})
+		upstreams = append(upstreams, &upstream{name: cu.Name, servers: servers, cond: cond})
 	}
 	timeout := time.Duration(config.ProxyTimeout) * time.Second
 	return &Proxy{us: upstreams, proxyTimeout: timeout}, nil
