@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 
+	"github.com/electroprovodka/loadbalancer/config"
+	"github.com/electroprovodka/loadbalancer/proxy"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -35,21 +37,21 @@ func main() {
 
 	configPath := parseFlags()
 
-	config, err := ReadConfig(configPath)
+	cfg, err := config.ReadConfig(configPath)
 	if err != nil {
 		log.Fatal(err)
 		return
 	}
 
-	setupLogging(config)
+	config.SetupLogging(cfg)
 
-	ps, err := NewProxyServer(config)
+	ps, err := proxy.NewProxyServer(cfg)
 	if err != nil {
 		log.Fatal(err)
 		return
 	}
 
-	log.Warnf("Starting the server on port :%d\n", config.Port)
+	log.Warnf("Starting the server on port :%d\n", cfg.Port)
 	ps.Start()
 	log.Warn("Server stopped")
 }

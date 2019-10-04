@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"context"
@@ -20,7 +20,7 @@ func newRequestID() string {
 	return xid.New().String()
 }
 
-func getRequestID(ctx context.Context) string {
+func GetRequestID(ctx context.Context) string {
 	requestID, ok := ctx.Value(requestIDKey).(string)
 	if !ok {
 		// TODO: generate new ID?
@@ -55,7 +55,7 @@ func tracing(next http.Handler) http.Handler {
 func logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
-			requestID := getRequestID(r.Context())
+			requestID := GetRequestID(r.Context())
 			// TODO: log response code
 			// TODO: log the target redirect
 			log.Infof("[ID:%s] %s %s, %s, %s", requestID, r.Method, r.URL.Path, r.RemoteAddr, r.UserAgent())

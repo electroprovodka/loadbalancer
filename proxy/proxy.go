@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"bytes"
@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/electroprovodka/loadbalancer/config"
 
 	log "github.com/sirupsen/logrus"
 
@@ -24,7 +26,7 @@ type server struct {
 // TODO: add weights?
 // TODO: add specific timeouts for each upstream?
 type upstream struct {
-	cond    Condition
+	cond    config.Condition
 	servers []*server
 	idx     int
 	name    string
@@ -219,7 +221,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) (int, error) {
 
 	// TODO: add content length?
 	// TODO: check how logging works for proxies
-	log.Infof("[ID:%s] %s %s -> %s %d, %s, %s", getRequestID(r.Context()), r.Method, r.URL.Path, fwd.URL, resp.StatusCode, r.RemoteAddr, r.UserAgent())
+	log.Infof("[ID:%s] %s %s -> %s %d, %s, %s", GetRequestID(r.Context()), r.Method, r.URL.Path, fwd.URL, resp.StatusCode, r.RemoteAddr, r.UserAgent())
 
 	return resp.StatusCode, nil
 }
@@ -229,7 +231,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) (int, error) {
 func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request) {
 	status, err := p.handle(w, r)
 	if err != nil {
-		log.Errorf("[ID:%s] %s %s : %s", getRequestID(r.Context()), r.Method, r.URL.Path, err)
+		log.Errorf("[ID:%s] %s %s : %s", GetRequestID(r.Context()), r.Method, r.URL.Path, err)
 
 		if e, ok := errors.Cause(err).(net.Error); ok && e.Timeout() {
 			status = http.StatusGatewayTimeout
@@ -239,15 +241,15 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func configureUpstreams(config *Config) ([]*upstream, error) {
+func configureUpstreams(cfg *config.Config) ([]*upstream, error) {
 	upstreams := make([]*upstream, 0)
-	for _, cu := range config.Upstreams {
+	for _, cu := range cfg.Upstreams {
 		var servers []*server
 		for _, sURL := range cu.Servers {
 			servers = append(servers, &server{scheme: sURL.Scheme, host: sURL.Hostname(), port: sURL.Port()})
 		}
 		c := cu.Condition
-		cond := GetCondition(c.Type, c.Key, c.Value)
+		cond := config.GetCondition(c.Type, c.Key, c.Value)
 		if cond == nil {
 			return nil, errors.Errorf("Can not parse condition for %s upstream", cu.Name)
 		}
@@ -258,23 +260,23 @@ func configureUpstreams(config *Config) ([]*upstream, error) {
 }
 
 // Reload is method that allows to reload Proxy config without restarting the server
-func (p *Proxy) Update(config *Config) error {
-	upstreams, err := configureUpstreams(config)
+func (p *Proxy) Update(cfg *config.Config) error {
+	upstreams, err := configureUpstreams(cfg)
 	if err != nil {
 		return errors.Wrap(err, "Can not update Proxy")
 	}
 	// Update current proxy with new configuration
 	p.us = upstreams
-	p.proxyTimeout = time.Duration(config.ProxyTimeout) * time.Second
+	p.proxyTimeout = time.Duration(cfg.ProxyTimeout) * time.Second
 	return nil
 }
 
 // NewProxy creates new Proxy struct based on the provided Config
-func NewProxy(config *Config) (*Proxy, error) {
-	upstreams, err := configureUpstreams(config)
+func NewProxy(cfg *config.Config) (*Proxy, error) {
+	upstreams, err := configureUpstreams(cfg)
 	if err != nil {
 		return nil, errors.Wrap(err, "Can not create new Proxy")
 	}
-	timeout := time.Duration(config.ProxyTimeout) * time.Second
+	timeout := time.Duration(cfg.ProxyTimeout) * time.Second
 	return &Proxy{us: upstreams, proxyTimeout: timeout}, nil
 }

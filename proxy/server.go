@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/electroprovodka/loadbalancer/config"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -50,15 +51,15 @@ func (p *ProxyServer) reloadHandler() http.HandlerFunc {
 		// TODO: reload server config (not only proxy)
 		// TODO: maybe create new proxy instead of updating existing - possible memory leak?
 		configPath := "config.yml"
-		config, err := ReadConfig(configPath)
+		cfg, err := config.ReadConfig(configPath)
 		if err != nil {
 			log.Error(err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
-		setupLogging(config)
-		err = p.proxy.Update(config)
+		config.SetupLogging(cfg)
+		err = p.proxy.Update(cfg)
 		if err != nil {
 			log.Error(err)
 			w.WriteHeader(http.StatusBadRequest)
@@ -68,15 +69,15 @@ func (p *ProxyServer) reloadHandler() http.HandlerFunc {
 }
 
 func (p *ProxyServer) setupServerShutdown() {
-	p.done = make(chan bool)
-
 	// TODO: original code contains size=1. Should we set it this way?
-	quit := make(chan os.Signal)
+	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		// Wait for system exit signal
 		<-quit
+		// Allow main goroutine to finish
+		defer close(p.done)
 
 		p.setServerHealth(false)
 
@@ -91,8 +92,6 @@ func (p *ProxyServer) setupServerShutdown() {
 		if err := p.server.Shutdown(ctx); err != nil {
 			log.Fatalf("Could not shutdown the server: %s\n", err)
 		}
-		// Allow main goroutine to finish
-		close(p.done)
 	}()
 }
 
@@ -109,24 +108,24 @@ func (p *ProxyServer) Start() {
 	<-p.done
 }
 
-func getServer(config *Config, router *http.ServeMux, middlewares ...Middleware) (*http.Server, error) {
+func getServer(cfg *config.Config, router *http.ServeMux, middlewares ...Middleware) (*http.Server, error) {
 	// TODO: check other timeouts (header, idle, etc.)
 	// TODO: Headers/Body size limit?
 	server := &http.Server{
-		Addr:        fmt.Sprintf(":%d", config.Port),
+		Addr:        fmt.Sprintf(":%d", cfg.Port),
 		Handler:     applyMiddlewares(router, middlewares),
-		ReadTimeout: time.Duration(config.ServerReadTimeout) * time.Second,
+		ReadTimeout: time.Duration(cfg.ServerReadTimeout) * time.Second,
 		// TODO: check correct value for this field https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts/
-		WriteTimeout: time.Duration(config.ServerWriteTimeout) * time.Second,
+		WriteTimeout: time.Duration(cfg.ServerWriteTimeout) * time.Second,
 		// TODO: Idle timeout for keep alive connections
 	}
 	return server, nil
 }
 
-func NewProxyServer(config *Config) (*ProxyServer, error) {
-	p := ProxyServer{}
+func NewProxyServer(cfg *config.Config) (*ProxyServer, error) {
+	p := ProxyServer{done: make(chan bool)}
 
-	proxy, err := NewProxy(config)
+	proxy, err := NewProxy(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +137,7 @@ func NewProxyServer(config *Config) (*ProxyServer, error) {
 	p.router.HandleFunc("/-/health", p.healthHandler())
 	p.router.HandleFunc("/-/reload", p.reloadHandler())
 
-	server, err := getServer(config, p.router, tracing)
+	server, err := getServer(cfg, p.router, tracing)
 	if err != nil {
 		return nil, err
 	}

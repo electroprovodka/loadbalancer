@@ -1,8 +1,8 @@
-package main
+package config
 
 import log "github.com/sirupsen/logrus"
 
-func setupLogging(config *Config) {
+func SetupLogging(config *Config) {
 	// TODO: add setup
 	log.SetFormatter(&log.TextFormatter{
 		FullTimestamp: true,
